@@ -1,0 +1,210 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw5
+# Local py: #!/usr/bin/env python2.7
+# Last Refactored: 10/29/15
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+reverseORF makes a null distribution of longest ORFs on a reverse strand of DNA
+
+File Inputs:
+Fasta file of protein sequence
+Codon usage table
+
+Output:
+table, 'Codons'+'\t'+'#Counts'+'\t'+'#Probability'+'\t'+'#p-value'
+
+Arguments:
+--protein [file]
+    Input protein sequence fasta file,
+    Uses random-codon model if not specified
+--codon [file]
+    Input codon bias table with header
+    Format is 'AA\tCodon\tcount\t/1000\tfraction'
+--num_sequences [int]
+    Number of codon simulations
+
+Hypotheses (from -- https://users.soe.ucsc.edu/~karplus/bme205/f15/Null.html):
+3:
+'The DNA is on the opposite strand of a 560-codon-long protein-coding gene 
+for S. solfataricus.'
+4: 'The DNA is on the opposite strand of THSA_SULSH. '
+
+How to Run and Graph Hypothesis 3:
+$ reverseORF --codon codontable.txt --protein protein.fasta --num_sequences
+10000 > model3.txt
+$ gnuplot null3.gnuplot model3.txt
+
+How to Run and Graph Hypothesis 4:
+$ reverseORF --codon codontable.txt --protein protein.fasta --num_sequences
+10000 > model4.txt
+$ gnuplot null4.gnuplot model4.txt
+
+"""
+from __future__ import print_function, division
+import argparse
+from collections import Counter
+from fastIO import *
+from rwg_codon import RandomCodonGenerator as rwg_codon
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+    parser.add_argument('--protein', type=argparse.FileType('r'),
+                        default=None, help='Input protein sequence fasta '
+                                          'file, uses random-codon '
+                                          'model if not specified')
+    parser.add_argument('--codon', type=argparse.FileType('r'),
+                        required=True, help='Input codon bias table with '
+                                            'header and format '
+                                            'AA\tCodon\tcount\t/1000\tfraction')
+    parser.add_argument('--num_sequences', type=int, default=10000,
+                        help='Number of codon simulations')
+
+    return parser.parse_args()
+
+
+def gen_random_orf(codonpref, simulations, protein_seq=False, orf_len=560):
+    """
+    generates random orf, with codons weighted by biological bias (codonpref)
+
+    :param codonpref: if protein_seq: dictdict, {str(AA):{str(codon):int(count}
+    :param codonpref: if not protein_seq: dictdict, {str(codon):int(count}
+    :param simulations: int, number of simultions
+    :param protein_seq: str, single letter amino acid seqence
+    :param orf_len: int, target ORF length
+    :return: str, joined codons
+    """
+    if protein_seq:
+        rand_codon_dict = {}
+        for amino in codonpref.keys():
+            rand_codon_dict[amino] = rwg_codon(codonpref[amino])
+        for sim in xrange(simulations):
+            codon_lis = []
+            for amino in protein_seq:
+                new_codon = rand_codon_dict[amino]()
+                codon_lis.append(new_codon)
+
+            yield ''.join(codon_lis)
+
+    else:
+        rand_codon = rwg_codon(codonpref)
+        for sim in xrange(simulations):
+            codon_lis = ['ATG']
+            while len(codon_lis) < orf_len:
+                new_codon = rand_codon()
+                if new_codon != 'TAG' and new_codon != 'TGA' and new_codon \
+                        != 'TAA':
+                    codon_lis.append(new_codon)
+
+            yield ''.join(codon_lis)
+
+def get_max_rORF_len(dna_seq):
+    """
+    recalls maximum ORF length on reverse strand
+
+    :param dna_seq: str, canonical DNA bases (ATCG)
+    :return: int, maximum reverse ORF length
+    """
+    rev_seq = dna_seq[::-1].translate(string.maketrans("ACGT", "TGCA"))
+
+    max_rORF_len = 0
+
+    for frame in xrange(3):
+        protein_seq = ''
+
+        for index in xrange(frame, len(rev_seq), 3):
+            codon = rev_seq[index:index + 3]
+            protein_seq += codon_table.get(codon, '')
+
+        for partial_seq in protein_seq.split('*'):
+            orf_list = partial_seq.split('M', 1)
+
+            if len(orf_list) == 2 and len(orf_list[1]) + 1 > max_rORF_len:
+                max_rORF_len = len(orf_list[1]) + 1
+
+    return max_rORF_len
+
+
+def print_hist_table(ORF_count, sims):
+    """
+    prints histogram data table to standard out for graphing in GNUplot
+
+    :param ORF_count: collections.Counter object, orf_len and counts
+    :param sims: int, number of simultions
+    :return: table, 'Codons'+'\t'+'#Counts'+'\t'+'#Probability'+'\t'+'#p-value'
+    """
+
+    order, counts, probs, p_values = [], [], [], []
+
+    for codons in sorted(ORF_count):
+        order.append(codons)
+        counts.append(ORF_count[codons])
+        probability = float(ORF_count[codons])/ sims
+        probs.append(probability)
+
+    for i in range(0,len(probs)):
+         p_values.append(sum(probs[i:]))
+
+    head = '#Codons' + '\t' + '#Counts' + '\t' + '#Prob' + '\t' + '#p-val'
+    histogram = [header]
+    for codons, count, prob, p in zip(order, counts, probs, p_values):
+        histogram.append(str(codons) + '\t' + str(count) + '\t' + str(prob)
+                         + '\t' + str(p))
+
+    return histogram
+
+def main():
+    """
+    parse command line arguments
+    generate ORF distribution from codon weights applied to protein sequence
+
+    """
+    # parse command line arguments
+    opt = parse_arguments()
+    proteinfile, codonfile, sims = opt.protein, opt.codon, opt.num_sequences
+
+    orf_counter = Counter()
+
+    # generate ORF distribution from codon weights applied to protein sequence
+    if proteinfile:
+        hypothesis = "Weighted Random Model: Oposite Strand of Protein"
+        codon_pref_dict = read_codon(codonfile, singlebase=True, AA=True)
+
+        protein_seq = ''
+        for seqID, com, seq in read_fasta(proteinfile):
+            protein_seq += seq
+
+        for orf in gen_random_orf(codon_pref_dict, sims, protein_seq):
+            max_rORF_len = get_max_rORF_len(orf)
+            orf_counter[max_rORF_len] += 1
+
+    if not proteinfile:
+        hypothesis = "Weighted Random Model: Oposite Strand of Gene"
+        codon_pref_dict = read_codon(codonfile, AA=False)
+
+        for orf in gen_random_orf(codon_pref_dict, sims):
+            max_rORF_len = get_max_rORF_len(orf)
+            orf_counter[max_rORF_len] += 1
+
+    for orfcount in print_hist_table(orf_counter, sims=sims):
+        print(orfcount)
+
+    # ### For plotting in matplotlib ###
+    # x = []
+    # for pair in sorted(orf_counter.items()):
+    #     for index in xrange(pair[1]):
+    #         x.append(float(pair[0]))
+
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,116 @@
+#!/usr/bin/env python3.4
+
+"""
+List words and their counts (by user arguments) from an ASCII text file
+
+Arguments:
+--alpha, sort word count in alphabetical order
+--ascend, sort word count in ascending order (most to least frequent)
+--descend, sorts words in descending order (least to most frequent)
+            words with same counts are then alphabetized as tie-breaker
+            sorts words in reverse alphabetical order when used with --alpha
+
+Examples:
+$wordcount --ascend < foo.txt > foo-ascending
+    takes foo.txt and prints to stdout foo-ascending (most to least frequent)
+$wordcount --alpha --descend < foo.txt > foo-alphabetical
+    takes foo.txt and prints to stdout foo-revalpha (reverse alphabetical)
+
+Note:
+"word" is a contiguous sequence of characters from the below set
+    {abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'}
+"alphabetical" ordering by the Python string comparison operator
+    where "Z" will come before "a"
+"""
+
+import argparse
+import collections
+import sys
+import re
+from string import punctuation
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=disc)
+    parser.add_argument("--alpha", action='store_true', default=False,
+                        dest='alpha', help='sort word count in alphabetical '
+                                           'order')
+    parser.add_argument("--ascend", action='store_true', default=False,
+                        dest='ascend', help='sort word counts from most to '
+                                            'least frequent')
+    parser.add_argument("--descend", action='store_true', default=False,
+                        dest='descend', help='sorts words counts from least '
+                                             'to most frequent, '
+                                             'or in reverse alphabetical '
+                                             'order when paired with --alpha')
+    args = parser.parse_args()
+    return args
+
+
+def read_word(txtFile):
+    """
+    Generates words from a 'plain-english' ASCII textfile
+
+    :param txtFile: file, ASCII text file
+    :return: yields word
+    """
+    for l in txtFile: # l is raw line from text file iterable
+        if not l: continue
+        line = l.strip()
+        line_split = re.compile(r'[\s{}]+'.format(re.escape(punctuation)))
+        for word in line_split.split(line):
+            if line and word != ' ':
+                yield ''.join(word)
+
+
+def write_output(counts, options):
+    """
+    Sorts word lists according to parse args and writes to stdout
+
+    :param counts: dict, default dict of {word(str): count(int)} pairs
+    :param options: argparse.Namespace, options(arguments) with boolean values
+    :return:
+    """
+    # alphabetical order and ascending count
+    if (options.alpha and options.ascend) or (
+                options.alpha and options.descend == False):
+        count_ranked = sorted(counts.items())
+    # reverse alphabetical order
+    elif (options.alpha and options.descend) or (
+                options.alpha and not options.ascend):
+        count_ranked = sorted(counts.items(), reverse=True)
+    # ascending count
+    elif options.ascend or not (options.descend or options.alpha):
+        count_ranked = sorted(counts.items(), key=lambda x: (x[1], x[0]))
+    # descending count
+    elif options.descend or not (options.ascend or options.alpha):
+        count_ranked = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+    for word, counts in count_ranked:
+        sys.stdout.write('{}\t{}\n'.format(word, counts))
+
+
+def main(args):
+    """
+    'parses command line arguments, reads text from stdin, and
+    prints two-column word-count pairs to stdout in the order specified
+    in the command line arguments' --Provided by K. Karplus
+
+    :param args: argparse.Namespace, options(arguments) with boolean values
+    """
+
+    options=parse_arguments()
+    counts=collections.defaultdict(int)
+    for word in read_word(sys.stdin):
+        counts[word] += 1
+    write_output(counts, options)
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+
+
+

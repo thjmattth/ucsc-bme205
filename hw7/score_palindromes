@@ -1,0 +1,282 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw7
+# Local py: #!/usr/bin/env python2.7
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+score_palindromes performs significance testing on palindromic sequences
+
+Inputs:
+    Fasta file(s), whether Gzipped or uncompressed
+
+Sample command:
+    $score_palindromes --max_e=0.01 --min_k=6 --max_k=6 H.influenzae.fa.gz
+
+Sample Output:
+    # Reading from H.influenzae.fa.gz
+    # There are 64 palindromes (or k-mers) being considered
+    # and about 3660280 positions where palindromes (or k-mers) could be
+    # There are a total of 37 under- or over- represented palindromes
+    # Reporting palindromes from length 6 to 6
+    # which are under- or over-represented with E_value <= 0.01
+    # K-mer	Observed	Expected	Z_Score	E_Value
+    AAATTT	5808		6760.10		-11.59	1.471e-29
+
+Arguments:
+--max_e [float]
+    Reports under/over-represented palindromes with E-values < max_e
+--min_k [int]
+    Min length of palindrome, default is 4
+--max_k [int]
+    Max length of palindrome, default is 6
+--pseudocount [str]
+    Adds pseudocounts to all possible kmers to avoid dividing by zero
+--all_kmers [bool]
+    Allows counting of general kmers rather than palindromes
+--alphabet [str]
+    Recognized sequence alphabet, defaults to all possible wildcards
+--sort_z [bool]
+    Displays hits in descending significance, default True
+--sort_kmer [bool]
+    Sort kmer in alphabetical order, default False
+file_list [file]
+    Accepts one or more fasta files separated by space
+
+Palindrome definition:
+    Even-len palindromes; identical to their reverse complements.
+    Odd-len palindromes; an even-length palindrome with a middle base inserted
+    Palindromes are interesting as potential DNA binding sites
+
+Note on signifiance testing:
+    Kmer counts assumed to be independent, thus fitting gaussian distribution
+    var(C(W)) = N* P(W) * (1-P(W)) = E(C(W)) * (1 - E(C(W))/N) ,
+    sigma(W) = sqrt(E(C(W)) * (1 - E(C(W))/N))
+        since E(C(W)) << N, var =approx= mean
+
+"""
+
+from __future__ import print_function, division
+import argparse
+import collections
+import time
+from math import sqrt, erfc
+import string
+import gzip
+from markov import *
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+    sort_arg = parser.add_mutually_exclusive_group()
+    parser.add_argument('--max_e', '-e', type=float, default=0.01, 
+                        help='Reports under/over-represented palindromes'
+                             'with E-values < max_e')
+    parser.add_argument('--max_k', '-k', type=int, default=6,
+                        help='Max length of palindrome, default is 6')
+    parser.add_argument('--min_k', '-m', type=int, default=4,
+                        help='Min length of palindrome, default is 4')
+    parser.add_argument('--pseudocount', '-p', type=int, default=0,
+                        help='Adds pseudocounts to all possible kmers to avoid dividing by zero')
+    parser.add_argument('--all_kmers', '-a', default=False,
+                        help='')
+    parser.add_argument('--alphabet', default='ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                        help='Sequence alphabet, defaults to all wildcards')
+    sort_arg.add_argument('--sort_z', default=True, help='Displays hits in '
+                                                      'descending significance')
+    sort_arg.add_argument('--sort_kmer', default=False, help='Sort kmer in '
+                                                            'alpha order')
+    parser.add_argument('--reverse_sort', '-rev', default=False,
+                        help='Reverses specified if True, default false')
+    parser.add_argument('file_sources', nargs='*',
+                        help='Accepts 1+ fasta files separated by space')
+    options = parser.parse_args()
+    if options.min_k > options.max_k:
+        parser.error('min_k should be < max_k to set appropriate range')
+    if options.min_k < 3:
+        parser.error('min_k should be >= 3 to meet context requirements')
+
+    return options
+
+
+def rev_complement(sequence, alphabet="ACGT", tebahpla="TGCA"):
+    """
+    gives base pairing, defaulting to Chagraff base pairing
+
+    :param alphabet: str, template sequence
+    :param tebahpla: str, complement to template sequence
+    :return: str, reverse complement (eg 'CAAAT' from 'ATTTG')
+    """
+    complement = string.maketrans(alphabet, tebahpla)
+    return sequence[::-1].translate(complement)
+
+
+def gen_rev_palindromes(kmin, kmax, bases="ACGT"):
+    """
+    generate list of palindromes of length n,
+    when kmin<=n<=kmax identical to their reverse complements
+
+    :param kmin: int, min length of tested palindrome
+    :param kmax:int, max length of tested palindrome
+    :param bases: str, possible bases inserted in middle of odd palindrome
+    :return: list, palindromes seqs identical to their reverse complements
+    """
+    dromes = []
+
+    for n in xrange(kmin, kmax + 1):
+        for left_mer in gen_kmers(n // 2, n // 2):
+            if n % 2 == 0:  # even palindrome
+                dromes.append(left_mer + rev_complement(left_mer))
+            else:           # odd palindrome
+                for midmer in bases:
+                    dromes.append(left_mer + midmer + rev_complement(left_mer))
+    return dromes
+
+
+def compute_stats(kmer_list, counts, N, max_e):
+    """
+    computes summary statistics (z_score, e_value) for results list
+
+    :param kmer_list: list of str, possible kmers (kmers of len max_k)
+    :param counts: dict, {kmers: counts} (kmers of len min_k - 2 through max_k)
+    :param N: int, total length of file input sequence
+    :param max_e: float, arbitrary significance threshold
+    :return: list of tuples, each tuple is kmer entry:
+             (k-mer, observed count, expected count, z-score, e-value)
+    """
+    summary_lis = []
+    # counts preserves entries for both forward and reverse palindromes,
+    # so it is necessary to offset this duplication by dividing the counts by 2
+    num_hypothesis = len(kmer_list) / 2
+
+    for kmer in kmer_list:
+        observed = int(counts[kmer] / 2)
+        expected = (counts[kmer[:-1]] * counts[kmer[1:]] / counts[kmer[
+                                                                  1:-1]]) / 2
+        sigma = sqrt(expected * (1 - expected / (N - len(kmer) + 1)))
+        try:
+            z_score = (observed - expected) / sigma
+        except ZeroDivisionError:
+            pass
+
+        e_undr = num_hypothesis * erfc(-z_score / sqrt(2))
+        e_over = num_hypothesis * erfc(z_score / sqrt(2))
+
+        # four signifiant figures
+        expect_sig = float('%.4g' % (expected))
+        z_sig = float('%.4g' % (z_score))
+        e_undr_sig = float('%.4g' % (e_undr))
+        e_over_sig = float('%.4g' % (e_over))
+
+        if e_undr <= max_e:
+            summary_lis.append((kmer, observed, expect_sig, z_sig, e_undr_sig))
+        elif e_over <= max_e:
+            summary_lis.append((kmer, observed, expect_sig, z_sig, e_over_sig))
+
+    return summary_lis
+
+
+def print_summary_lis(summary_lis, file_sources, runtime, num_kmers, N, min_k,
+                      max_k, max_e):
+    """
+    prints summary stats as tabbed table to stdout
+
+    :param summary_lis: list of tuples, see compute_stats function for order
+    :param file_sources: list of strings, input file names
+    :param runtime: float, user's runtime (in seconds)
+    :param num_kmers: int, number of tested palindromes
+    :param N: int, length of tested palindrome
+    :param min_k: int, min length of tested palindromes
+    :param max_k: int, max length of tested palindromes
+    :param max_e: float, arbitrary significance threshold
+    :return: table (tab separated) to stdout
+    """
+
+    # table header
+    print("# Reading from {}".format(
+            ' & '.join([fafilename for fafilename in file_sources])))
+    print("# After reading, user time is  {} seconds".format(runtime))
+    print("# There are {} kmers being considered ( {} hypotheses),"
+            .format(num_kmers, num_kmers * 2))
+    print("# and about {} positions where kmers could be."
+            .format(N))
+    print("# Reporting palindromes from length {} to {} ,".format(min_k,
+                                                                  max_k))
+    print("# which are under- or over-represented with E_value <= {}"
+            .format(max_e))
+
+    # column header
+    print("#k-mer\tobserved\texpected\tZ_Score\t\t\tE_Value")
+
+    for kmer, observed, expected, Z_score, E_value in summary_lis:
+        print("{}\t{}\t\t{}\t\t{}\t\t{}"
+            .format(kmer, observed, expected, Z_score, E_value))
+    print("# Total user time is {} seconds".format(runtime))
+
+
+def main():
+    """
+    parses arguments from command line
+    build possible kmers
+    compute Z_score and E_value
+    compute user runtime
+    print summary
+    """
+    start_time = time.time()
+
+    # parses arguments from command line
+    opt = parse_arguments()
+
+    # generates list of kmers for signifiance testing
+    if opt.all_kmers:
+        gen_kmer_list = gen_kmers(opt.min_k, opt.max_k)
+    else:
+        gen_kmer_list = gen_rev_palindromes(opt.min_k, opt.max_k)
+
+    # count kmers from file inputs (total count) and total len (N)
+    all_counts, N = collections.Counter(), 0
+    for fafilename in opt.file_sources:
+        if fafilename.endswith('.gz'):
+            fafile = gzip.GzipFile(fafilename, mode='r')
+        else:
+            fafile = open(fafilename, mode='r')
+        count, n = count_kmer(fafile, opt.alphabet, kmin=opt.min_k - 2,
+                              kmax=opt.max_k, pseudo=opt.pseudocount)
+        all_counts += count
+        N += n
+        fafile.close()
+
+    rev_counts = {rev_complement(kmer): val for kmer, val in
+                  all_counts.items()}
+    for rev_kmer, val in rev_counts.items():
+        all_counts[rev_kmer] += val
+
+    # compute Z_score and E_value
+    kmer_stats = compute_stats(gen_kmer_list, all_counts, N, opt.max_e)
+
+    # compute user runtime
+    end_time = time.time()
+    total_run_time = end_time - start_time
+
+    # print summary
+    if opt.sort_z:      # sort by z_score
+        kmer_stats.sort(key=lambda result_tuple: result_tuple[4],
+                        reverse=opt.reverse_sort)
+    if opt.sort_kmer:   # sort by kmer
+        kmer_stats.sort(key=lambda result_tuple: result_tuple[0],
+                        reverse=opt.reverse_sort)
+
+    print_summary_lis(summary_lis=kmer_stats, file_sources=opt.file_sources,
+                      runtime=total_run_time, num_kmers=len(gen_kmer_list),
+                      N=N, min_k=opt.min_k, max_k=opt.max_k, max_e=opt.max_e)
+
+
+if __name__ == "__main__" :
+    main()

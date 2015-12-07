@@ -1,0 +1,206 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw4
+# Local py: #!/usr/bin/env python2.7
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+coding-cost_old computes kmer-level information gain between test and train data
+
+reads in a table of k-mer counts (kmer'\t\count) from stdin and
+FASTA-formatted sequences from a file, computes the total coding
+cost in bits for the sequences, computes average cost per character,
+computes average cost per sequence, and prints to stdout
+
+Inputs:
+kmer counts from stdin (training data) in form kmer'\t'count
+
+Output:
+Printed summary of encoding cost
+        Total Encoding Cost:	 float
+        AVG Cost per Char:	 float
+        AVG Cost per Seq:	 float
+
+Arguments:
+testfile [file]
+    positional fasta file for markov test condition
+--alphabet [str]
+    String of acceptable base chars
+--pseudo [float or int]
+    adds non-zero positive number to kmer counts to prevent zero counts
+    when calculating kmer coding cost -log(probability)
+
+Sample run:
+$ count-kmers -o0 < train.seqs | coding-cost_old test.seqs > summary.txt
+    0 order markov model
+    table of kmers and counts from train.seqs fasta file
+    test.seqs provides test kmers with counts for coding-cost_old calculations
+    coding cost summary printed to sys.stdout as file summary.txt
+
+Notes:
+    Alphabet autodetected from training alpha if not specified
+    Default pseudocount is 1
+    Limited to use with -o0 and -o1 Markov models
+"""
+from __future__ import print_function, division
+from markov import *
+import math, argparse, sys, itertools
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+
+    parser.add_argument('test_file', type=argparse.FileType('r'),
+                        help='positional fasta file for markov test condition')
+    parser.add_argument('-a', '--alphabet',type=str,
+                        help='acceptable base characters'
+                             'defaults to alphabet detected from training set')
+    parser.add_argument('-p', '--pseudo', type=(int or float), default=1.0,
+                        help='pseudocounts add non-zero positive number'
+                             'to kmer counts to prevent zero counts when '
+                             'calculating kmer coding cost -log(probability)')
+
+    options = parser.parse_args()
+    
+    return options
+
+
+def main():
+    """
+    parses kmers and counts from training set
+    compute total_cost, avg_cost_char, avg_cost_seq for order 0 and order 1
+    prints above coding cost summary to stdout
+    """
+    options = parse_arguments()
+    
+    # parses kmers and counts from training set
+    train_kmer_count = {}
+    for line in sys.stdin:
+        line = line.rstrip()
+        kmer,count = line.split('\t')
+        train_kmer_count[kmer] = int(count)
+    order = len(train_kmer_count.keys()[0])-1
+
+    # autodetect alphabet
+    if options.alphabet:
+        alphabet = options.alphabet
+    if not options.alphabet:
+        alphabet_temp = ''
+        for kmer in train_kmer_count.keys():
+            alphabet_temp += kmer
+        alphabet = (''.join(set(alphabet_temp))).replace('^', '').replace(
+            '$', '')
+
+    # permute all possible kmers given alphabet
+    if order == 0:
+        permutations = list(alphabet)
+    if order == 1:
+        permutations = [''.join(p) for p in list(itertools.product('^'
+                                                                   +
+                                                                   alphabet
+                                                                   + '$',
+                                                                   repeat=order +1))]
+    # calculate probability matrix
+    D_kmer_prob = {}
+    kmerCount_sum = 0
+
+    if order == 0:
+        # add pseudocounts
+        for kmer in permutations:
+            if kmer != '^' or '$':
+                kmerCount_sum += train_kmer_count[kmer] + options.pseudo
+        for kmer in permutations:
+            if kmer != '^' or '$':
+                D_kmer_prob[kmer] = -math.log(float(train_kmer_count[kmer] + 
+                                                  options.pseudo) 
+                                            / kmerCount_sum, 2)
+        kmerCount_sum = 0
+
+        test_kmer_count = count_kmer(input=options.test_file, 
+                                   alphabet=alphabet, order=0)
+
+        total_cost = sum([test_kmer_count[kmer] * D_kmer_prob[kmer] for kmer 
+                          in D_kmer_prob.keys()])
+
+        total_seqs = 0
+        for kmer in test_kmer_count.keys():
+            if '$' in kmer:
+                total_seqs += test_kmer_count[kmer]
+        total_chars = sum(test_kmer_count[kmer] for kmer in alphabet)
+
+        avg_cost_char = total_cost/total_chars
+        avg_cost_seq = total_cost/total_seqs
+
+    if order == 1:
+        temp = []
+        for kmer in permutations:
+            if (kmer[0] != '$') and (kmer[-1] != '^'):
+                temp.append(kmer)
+        permutations = temp
+
+        # build kmer_counter with pseudo counts from training data
+        kmer_pseudo_train = {}
+        for kmer in permutations:
+            if kmer not in train_kmer_count.keys():
+                kmer_pseudo_train[kmer] = options.pseudo
+            if kmer in train_kmer_count.keys():
+                kmer_pseudo_train[kmer] = train_kmer_count[kmer] + options.pseudo
+        for kmer in permutations:
+            kmerCount_sum += kmer_pseudo_train[kmer]
+
+        # conditional probabilities with pseudocounts
+        kmer_conditional_train=collections.Counter()
+        for kmer in permutations:
+            kmer_conditional_train[kmer[:-1]] += kmer_pseudo_train[kmer]
+        for kmer in permutations:
+            D_kmer_prob[kmer] = -math.log(float(kmer_pseudo_train[kmer]) / 
+                                          kmer_conditional_train[kmer[:-1]], 2)
+
+        # build kmer counter from test file
+        kmer_pseudo_test = {}
+        test_kmer_count = count_kmer(input=options.test_file,
+                                    alphabet=alphabet, order=order)
+        for kmer in permutations:
+            if kmer not in test_kmer_count.keys():
+                kmer_pseudo_test[kmer] = options.pseudo
+            if kmer in test_kmer_count.keys():
+                kmer_pseudo_test[kmer] = test_kmer_count[kmer] + options.pseudo
+
+        num_perm = []
+        for kmer in permutations:
+            if (kmer in test_kmer_count.keys()) and (kmer in D_kmer_prob.keys()):
+                num_perm.append(kmer)
+
+        # total coding cost with empty condition
+        total_cost = sum([test_kmer_count[kmer] * D_kmer_prob[kmer] for kmer
+                          in num_perm])
+        total_cost += kmer_pseudo_test['^$'] * D_kmer_prob['^$']
+        total_chars = 0
+        for kmer in test_kmer_count:
+            if '^' not in kmer:
+                total_chars += test_kmer_count[kmer]
+
+        total_seqs = 0
+        for kmer in test_kmer_count.keys():
+            if '$' in kmer:
+                total_seqs += test_kmer_count[kmer]
+
+        avg_cost_char = total_cost/total_chars
+        avg_cost_seq = total_cost/total_seqs
+
+    print('Total Encoding Cost:\t',total_cost)
+    print('AVG Cost per Char:\t',avg_cost_char)
+    print('AVG Cost per Seq:\t',avg_cost_seq)
+
+
+if __name__ == '__main__':
+    main()
+

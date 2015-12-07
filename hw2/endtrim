@@ -1,0 +1,164 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw2
+# Local py: #!/usr/bin/env python2.7
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+endtrim yields the quality reads in your sequence files
+
+Raw sequence data often has quality data collated with sequence data.  This
+program allows to user to trim low quality reads from their sequence of
+choice -- whether RNA, DNA or Protein -- and provides formatted outputs of
+this trimmed data at the discretion of the user's command line arguments, listed below.
+
+Inputs:
+FastQ-, Fasta-, and/or FastaQuality -like file via the command line
+
+Output:
+FastQ-, Fasta-, and/or FastaQuality -like file (filetype set in Arguments),
+truncated at first sign low quality peak/base (cutoff set in Arguments), 
+repeating this process for every sequence in your file. 
+
+Arguments:
+--min_qual [integer]
+    The lowest quality value that can appear in the output. 
+    Lower quality bases are removed and remainder of sequence truncated
+--in_33 [filename]
+    Input file in fastq format, using Phred+33 coding
+--in_64 [filename]
+    Input file in fastq format, using Phred+64 coding
+--out_33 [filename]
+    Output file in fastq format, using Phred+33 coding
+--out_64 [filename]
+    Output file in fastq format, using Phred+64 coding
+--in_fasta [filename]
+    Input file in fasta format. 
+    If used, there must also be a --in_qual argument.
+--in_qual [filename]
+    Input file in fasta quality format. 
+    If used, there must also be a --in_fasta argument.
+--out_fasta [filename]
+    Output file in fasta format.
+--out_qual [filename]
+    Output file in fasta quality format. 
+    If used, there must also be a --out_fasta argument.
+
+Example of Unix command line prompt:
+$ endtrim --min_qual 35 --in_64 foo.fastq --out_fasta foo.fa --out_qual
+foo.qual
+
+Trims Phred+64 encoded foo.fastq to exclude any score less than 35, and 
+outputs trimmed version to foo.fa (fasta) and a foo.qual (quality)
+
+Fileformat Notes:
+Default Fasta alphabet: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+Default quality score cutoff: 30
+Inputs should be close to NCBI format, while output will follow NCBI format
+Fasta-quality outputs a Fasta-like file with quality as ints sep by two spaces
+Fasta and Fasta-quality formats are wrapped at 80 character lines
+
+Endtrimming notes:
+All sequences in a file will be subject to the specified threshold
+Empty sequence in files will be processed and reprinted as empty sequences
+Sequences of entirely sub-threshold scores will print as empty sequences
+"""
+
+from __future__ import division, print_function
+import argparse
+from fastIO import *
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+    
+    # quality argument
+    parser.add_argument('--min_qual', type=int, default=30, dest='min_qual',
+                        help='Lowest quality value to appear in output')
+    
+    # input arguments
+    in_format = parser.add_mutually_exclusive_group()
+    in_format.add_argument('--in_33', dest='in_33',
+                                        type=argparse.FileType('r'),
+                                        help='Input fastq file with Phred+33 coding')
+    in_format.add_argument('--in_64', dest='in_64',
+                                        type=argparse.FileType('r'),
+                                        help='Input fastq file with Phred+64 coding')
+    in_format.add_argument('--in_fasta', dest='in_fasta',
+                                        type=argparse.FileType('r'),
+                                        help='Input fasta format, use with --in_qual argument')
+    parser.add_argument('--in_qual', dest='in_qual', type=argparse.FileType('r'), 
+                        help='Input quality format, use with --in_fasta')
+    # output arguments
+    parser.add_argument('--out_33', dest='out_33', type=argparse.FileType('a'), 
+                        help='Output file in fastq format, Phred+33 coding')
+    parser.add_argument('--out_64', dest='out_64', type=argparse.FileType('a'),
+                        help='Output file in fastq format, Phred+64 coding')
+    parser.add_argument('--out_fasta', type=argparse.FileType('a'),
+                        dest='out_fasta', help='Output fasta format')
+    parser.add_argument('--out_qual', type=argparse.FileType('a'),
+                        dest='out_qual', help='Output quality format')
+    args = parser.parse_args()
+    if args.in_fasta and not args.in_qual:
+        parser.error('InputErr: Please provide in_qual source')
+    if args.in_qual and not args.in_fasta:
+        parser.error('InputErr: Please provide in_fasta source')
+    if args.out_fasta and not args.out_qual:
+        parser.error('OutputErr: Please also provide out_qual destination')
+    if args.out_qual and not args.out_fasta:
+        parser.error('OutputErr: Please also provide out_fasta destination')
+    return args
+
+  
+def main():
+    """
+    parses fasta/Q/qual-like files from parsed arguments (file type/encoding)
+    performs endtrimming from parsed arguments (quality threshold)
+    writes fasta/Q/qual-like files from parsed arguments (file type/encoding)
+    """
+    options = parse_arguments()
+    needtrim = None
+
+    # parse file conditions
+    if options.in_fasta and options.in_qual:
+        # needtrim is the input after being read by fastRead.py
+        needtrim = read_fasta_with_quality(options.in_fasta, options.in_qual)
+    elif options.in_33:
+        needtrim = read_fastq(options.in_33, 33)
+    elif options.in_64:
+        needtrim = read_fastq(options.in_64, 64)
+
+    # write file conditions
+    if options.out_33 or options.out_64:
+        start_char, qualFile = '@', False
+        if options.out_33:
+            offset, outfile = 33, [options.out_33]
+        else:
+            offset, outfile = 64, [options.out_64]
+    else:
+        start_char, offset, qualFile = '>', 0, True
+        outfile = [options.out_fasta, options.out_qual]
+
+    # trim sequence
+    for seqID, com, seq, qual in needtrim:
+        trimmed = trim_seq(seqID, com, seq, qual, options.min_qual)
+        for seqID, com, seq, qual in trimmed:
+            if qualFile:
+                adj_qual = [str(j) for j in qual]
+                joined_qual = " ".join(adj_qual)
+            elif not qualFile:
+                adj_qual = [chr(j + offset) for j in qual]
+                joined_qual = "".join(adj_qual)
+
+            # write sequence to file
+            write_fastfile(seqID, com, seq, joined_qual, start_char, outfile)
+
+if __name__ == "__main__":
+    main()

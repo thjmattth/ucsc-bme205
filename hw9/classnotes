@@ -1,0 +1,169 @@
+09/30/15
+upload files:
+rsync -avxu /path/to/source/ /path/to/destination/ slash at the end shows
+appending / means its a directory
+chmod go+rxS BME205
+puts current directory in path: (do on test server, but confirm on SO)
+set PATH=.:$PATH
+export PATH
+python, returning generators:
+return (id, com, seq, qual) # will return tuple (say from def read_foo(...)
+id, com, seq, qual = read_foo(...) # unpacks tuple
+yield (id, com, seq, qual) # will return generator
+for id, com, seq, qual in read_foo(...): # iterates through generator object
+good to know for the future:
+always know the error rates for your platform/preps that underlie your data
+10/05/15
+documentation:
+its ok to use tables to explain option combinations in docstring
+finding words with regex:
+re.findall(r"[a-zA-Z']+",...)
+re.finditer(r"[a-zA-Z']+",...)
+or
+re.split((r"[^a-zA-Z']+",...) # contrapositive of the above exampels
+python writing:
+dont concat strings, explicit string conversion is also a pain
+use .format
+or use print(word, value, sep='\t')
+treat fasta and fastq as binar files rather than bytes:
+quality strings could be bytes of fastQ, keep it as pure bytes
+fasta files could have
+python initializing names:
+call them None until you change what they represent
+endtrim:
+accept empty strings and output them
+stochastics:
+stochastic model is a computable probability function (we need an algorithm)
+strings over a particular alphabet (ACTG - cannonical, ACTGN, AGCTNXHBMDUVRYSW)
+ACDEFGHIKLMNPQRSTVWYX,
+Alphabet = A
+A* = 0 or more letters in a row
+A+ = 1 or more letters in a row
+10/09/15:
+iid is indenpendent identity distrribution
+conditional probability is P(S|T), S={A,C,T,G,Start}
+P(S|T) = P(S,T) / P(T)
+eg given sequence AGT, P(x_j=T|x_j-1=G)
+P(x_j=T,x_j-1=G) / P(x_j-1=G)
+can keep simplifying above formula
+joint prob is is P(S,T), smms to 1
+10/15/15:
+Maximum Likelihood Expectation
+Lagrangian Multiplier
+Coding Cost ==> seq: x, model: m  =
+Average Coding Cost, Entropy ==> - SUM ( P(x) log_2 P_m(x) )
+Relative Entropy, always positive ==> - SUM ( P_n log (P_m(x) / P_n(x) )
+ACC shouldn't go up with addition of new data (if your model is good)
+Posterior Odds Ratio ==> P(m|data) / P(n|data)
+Likelihood Ratio ==> P(data|m) / P(data|n)
+Prior Odds Ratio, n:  ==> P(m) / P(n)
+10/26/15
+palindrome intro:
+P(GTATAC|_TATA_) = P(GTATAc|TATA_) * P(gTATAC|_TATA)
+counts(GTATAC) / counts(_TATA_) = P(GTATAC|_TATA_)
+counts(TATAC) / counts(TATA_) = P(TATAC|TATA_)
+counts(GTATA) / counts(_TATA) = P(GTATA|_TATA)
+10/30/15:
+get library privliges
+library.ucsc.edu off campus register barcode
+11/9/15:
+feedback for hw6:
+alternate stop
+reputer, dot plot, look for repeats in non-coding (inserted at assembly, err?)
+rwyn, tRNAscan to do tRNA (find non-canonical tRNAs)
+rna secondardy structure (search for canonical structure in found
+non-canonical tRNA
+gene features (transmembrane helixes in cox)
+alignments with known structures
+alignment with pfam
+alignment to closest species, phylogenic tee and closest neighbours
+search for remnants of ATP8
+finding longest orf (start and stop codons?)
+11/9/15:
+arbitrary gap alignment
+must have alignment pair at either end of a pair
+dynamic programming for loop:
+for i in xrange(m):
+	for j in xrange(n):
+		# indexing list of lists, np array would be T[i,j]
+		T[i][j] = S((X[i],Y[j])) + max(
+			0,
+			max(
+				T[i-1][j-k-1] - gap[k] for k in xrange(j))
+			max(
+				T[i-k-1][j-1] - gap[k],for k in xrange(i))
+
+			)
+
+11/15/15
+Global alignment:
+Tij = score of best global alignment of x0 ... xi with y0 ... yj
+that ends with xi and yj paired
+Tij = Sxiyj + max(
+		max 0<=k<=i(
+			Ti-k-1,j-1 - gap(k)
+		max 0<=k<=i(
+			Tj-1,j-k-1 - gap(k)    <--- insert x, delete y
+
+
+basecase: start-start must align at -1,-1 (off matrix) must be zero
+11/16/15:
+A2M format:
+case matters, "-" as extra character (over regular FASTA)
+uppercase and "-" means aligned position
+lowercase and "-' means insertion
+Every sequence has same # of aligned positions
+>s1
+--AceGH		--AceGH**
+>s2			ACA**CEgh
+ACACEgh
+conveys how other sequences (slave) relate/align to guide sequence (master)
+to check if A2M: $checkseq foo -db x.a2m    or at least check if same lengths
+
+U_ij = max (
+			S_Xi,Yj
+			S_Xi,Yj + U_Xi-1,Yj-1
+			U_Xi-1,Yj-1 - g
+
+11/20/15:
+AFFINE GAP COSTS;
+gap(k) = {  (k-1e) + g , k > 0
+			0,          k = 0
+			}
+where e is gap extension, g is gap opening
+
+			d + e + e
+		ACD---
+		---EFG
+	g + e + e
+11/23/15:
+x=log P
+y=log q
+
+= log(p+q)
+=log(e^e + e^y)
+x + log(1+e^y-x)
+f(a) = log(1+e^a)
+	if e^a is really small, f(a) will be approximately e^a
+	log(1+e) is approximately e
+f(a) is approximately e^a
+f(a) is approximately 0
+precomute
+
+check for best alignment:
+
+	if:
+		g = 12
+		e = 2
+		d = 4
+		CC blossom62 = +9
+		GG blossom62 = +6
+
+		   C  D  G
+	   a   C  -  G   h
+	  -12 +9 -12 +6  -12
+
+
+	        C  D  G
+	   a    C  G  H
+	  -12  +9 -1 -2  = -6 score for this alignment

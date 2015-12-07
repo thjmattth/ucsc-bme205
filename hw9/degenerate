@@ -1,0 +1,241 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw9
+# Local py: #!/usr/bin/env python2.7
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+degenerate finds all possible amino acids encoded by a degenerate codon,
+and identifies the degenerate codon with the lowest imbalance or degeneracy
+
+Imbalance definition:
+        A measure of variation (degeneracy) of DNA synthesis
+        High imbalance indicates more degeneracy
+        Imbalance = (
+                    max # potential codons for each amino acid
+                  - min # potential codons for each amino acid
+                    )   /   total # codons represented
+
+Input:
+    Codon preference table
+    Genetic code
+
+Output options:
+    min-codons:
+        prints minimum imbalance score and every codon for each amino set
+        'amino acid set'	'min_imbalance_score'	'codon1,codon2...'
+    full:
+        lists each codon with its imbalance and frequency for each amino set
+        'amino acid set'	'[codon1, imbalance_score, frequency, 'codon2,...]'
+    minimal:
+        prints codon with minimum imbalance score for each amino set
+        'amino acid set'	'min_imbalance_score'	'min_imbalance_codon'
+
+Arguments:
+    --output_format [str]
+        results print format, see program docstring for usage
+    --codon [str]
+        GCG-formatted codon preference table as file with header or url
+    --codon_table [int]
+        genetic code in NCI web format as file or url
+    --gene_table [int]
+        specific genetic code to use from codon_table matching NCI name
+
+Default arguments:
+    --output_format = minimal
+    --codon = http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?
+    --codon_table = ftp://ftp.ncbi.nih.gov/entrez/misc/data/gc.prt
+    --gene_table = Standard
+
+Resource:
+    Edelman, Gerald M, and Joseph A Gally.
+    "Degeneracy and complexity in biological systems."
+    Proceedings of the National Academy of Sciences 98.24 (2001): 13763-13768.
+    http://www.pnas.org/content/98/24/13763.full.pdf
+"""
+
+from __future__ import division, print_function
+from itertools import product
+from collections import Counter
+from urllib2 import urlopen, Request
+import sys
+import argparse
+from fastIO import read_codon, read_codon_url, ncbi_genetic_code_table
+
+aa_to_nt = {'Y': 'TC', 'K': 'GT', 'S': 'GC', 'T': 'T', 'W': 'AT', 'G': 'G', 
+            'B': 'GTC', 'D': 'GAT', 'C': 'C', 'M': 'AC', 'N': 'AGCT', 
+            'A': 'A', 'V': 'GCA', 'R': 'GA', 'H': 'ACT'}
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+
+    parser.add_argument('--output_format', '-o', default='minimal',
+        help='results print format, see program docstring for usage')
+
+    parser.add_argument('--codon', '-c',
+        default='http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?'
+                'species=199310&aa=1&style=GCG',
+        help='GCG-formatted codon preference table as file with header or url')
+    parser.add_argument('--codon_table', '-t',
+        default='ftp://ftp.ncbi.nih.gov/entrez/misc/data/gc.prt',
+        help='genetic code in NCI web format as file or url')
+    parser.add_argument('--gene_code', '-g', default='Standard',
+        help='specific genetic code to use from codon_table matching NCI name')
+    args = parser.parse_args()
+
+    if not args.codon.startswith('http://'):
+        args.codon = open(args.codon, mode='r')
+    else:
+        args.codon = urlopen(Request(args.codon))
+
+    if not args.codon_table.startswith(('http://', 'ftp://')):
+        args.codon_table = open(args.codon_table, mode='r')
+    else:
+        args.codon_table = urlopen(Request(args.codon_table))
+
+    return args
+
+
+def compose_tables(aa_to_nt, genetic_code):
+    """
+    builds degenerate codon tables used to calculate codon imbalance
+
+    :param aa_to_nt: dict, maps single letter amino acids to DNA nucleotides
+    :param genetic_code: dict, DNA maps DNA codons to single letter amino acids
+    :return codon_expand: dict, maps degenerate codons to possible codons
+    :return degcod_count: dict of counter, counts single letter amino acids
+                        of possible codons
+    """
+
+    # expand degenerate codon
+    codon_expand = {}
+    makecodon = product(''.join(aa_to_nt.keys()), repeat=3)
+    for deg_cod in makecodon:
+        codon_list = []
+        cartesian = product(aa_to_nt[deg_cod[0]],
+                                      aa_to_nt[deg_cod[1]],
+                                      aa_to_nt[deg_cod[2]])
+        codon_list = [''.join(codon) for codon in cartesian]
+        codon_expand[''.join(deg_cod)] = codon_list
+
+    # count possible amino acids from degenerate codon
+    degcod_count = {}
+    for deg_cod in codon_expand:
+        aa_lis = [genetic_code[codon] for codon in codon_expand[deg_cod]]
+        degcod_count[deg_cod] = Counter(aa_lis)
+
+    return codon_expand, degcod_count
+
+
+def calc_codon_stats(degcod_count, codon_expand, codon_counts):
+    """
+    calculates codon imbalance and frequency
+
+    :param degcod_count: dict of counter, counts single letter amino acids
+                        of possible codons
+    :param codon_expand: dict, maps degenerate codons to possible codons
+    :param codon_counts: counter dict, codon preference table from opt.codon
+    :return results: dict, maps amino acid set to sorted list of results
+                    {'aminoset': ['deg_codon', imbalance, frequency]...}
+                    deg_codon sort: imbalance(ascending), frequency(descending)
+    """
+
+    alphaAA_to_degcod = {}
+    for deg_cod in degcod_count.keys():
+        aa_joined = ''.join(sorted(degcod_count[deg_cod].keys()))
+        try:
+            alphaAA_to_degcod[aa_joined].append(deg_cod)
+        except:
+            alphaAA_to_degcod[aa_joined] = [deg_cod]
+
+    results = {}
+    total_count = sum(codon_counts.values())
+    for aa_set in alphaAA_to_degcod.keys():
+
+        results[aa_set] = []
+        for deg_cod in alphaAA_to_degcod[aa_set]:
+
+            # calculate codon imbalance
+            counts = degcod_count[deg_cod].values()
+            imbalance = (max(counts) - min(counts)) / sum(counts)
+
+            # calculate average frequency
+            codsum = sum(codon_counts[cod] for cod in codon_expand[deg_cod])
+            avg_count = codsum / len(codon_expand[deg_cod])
+            frequency = avg_count / total_count
+
+            results[aa_set].append([deg_cod, imbalance, frequency])
+
+        # sort degenerate codons: imbalance(ascending) & frequency(descending)
+        results[aa_set].sort(key=lambda x: (x[1], -x[2]))
+
+    return results
+
+
+def print_results(results, output_format):
+    """
+    prints tab-separated results to stdout, rounded to 3 sigfigs
+    
+    :param results: dict, maps amino acid set to sorted list of results
+    :param output_format: str, see program documentation for usage
+    """
+    
+    if output_format == 'min-codons':
+        for aa in sorted(results.keys()):
+            min_imbal = results[aa][0][1]
+            min_codons = [cod[0] for cod in results[aa] if cod[1] == min_imbal]
+            join_min_codons = ','.join(min_codons)
+            print("{:<20}\t{:.3f}\t{}".format(aa, min_imbal, join_min_codons))
+            
+    elif output_format == 'full':
+        for aa in sorted(results.keys()):
+            cod_join = []
+            cod_join = (', '.join(["'{}, {:.3f}, {:.4f}'"
+                                    .format(cod[0], cod[1], cod[2])
+                                    for cod in results[aa]]))
+            print(aa + ' [' + cod_join + ']')
+
+    else:
+        for aa in sorted(results.keys()):
+            min_imbal = results[aa][0][1]
+            print("{:<20}\t{:.3f}\t{}"
+                    .format(aa, min_imbal, results[aa][0][0]))
+
+
+def main():
+    """
+    parse arguments from command line
+    reads codon counts and genetic code
+    compose_tables
+    calculate imbalance and frequency
+    print output
+    """
+
+    # parse arguments from command line
+    opt = parse_arguments()
+
+    # reads codon counts and genetic code
+    codon_counts = read_codon_url(opt.codon)
+    genetic_code = ncbi_genetic_code_table(opt.codon_table, opt.gene_code)
+
+    # compose_tables
+    codon_expand, degcod_count = compose_tables(aa_to_nt, genetic_code)
+    
+    # calculate imbalance and frequency
+    results = calc_codon_stats(degcod_count, codon_expand, codon_counts)
+
+    # print output
+    print_results(results, opt.output_format)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

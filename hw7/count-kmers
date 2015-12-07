@@ -1,0 +1,97 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw4
+# Local py: #!/usr/bin/env python2.7
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+count-kmers calculates frequency of kmers from fasta file
+
+Inputs:
+FastQ-, Fasta-, and/or FastaQuality -like file via stdin
+
+Output:
+Printed statement of kmer'/t'count (kmer name, tab, kmer count) by line
+
+Arguments:
+--order [integer]
+    Markov order, or context, generating kmers of len(order + 1)
+--alphabet [str]
+    String of acceptable base chars
+--sort [str]
+    Sort kmer output A->Z (forward), or Z->A (reverse)
+--start_char [str]
+    Sequence start char
+--stop_char [str]
+    Sequence start char
+
+Default arguments:
+    --order = 0
+    --alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    --sort = 'forward'
+    --start = '^'
+    --stop = '$'
+
+Example of Unix command line prompt:
+$ count-kmers -o1 --alphabet=ACDEFGHIKLMNPQRSTVWY < tiny.seqs
+counts kmers of len 2 from tiny.seqs with short alphabet (no B, X, wildcards)
+"""
+
+from markov import *
+import sys
+import argparse
+import string
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+    parser.add_argument('-o', '--order', type=int, nargs='?', default=0,
+                        help='Markov order generating kmers of len(order + 1)')
+    parser.add_argument('-a', '--alphabet', type=str, nargs='?',
+                        default='ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                        help='String of acceptable base chars')
+    parser.add_argument('-s', '--sort', type=str, nargs='?',
+                        default='forward',
+                        help='Sort kmer output A->Z (forward)'
+                             'Sort kmer output Z->A (reverse')
+    parser.add_argument('--start', type=str, default='^',
+                        help='sequence start char, defaults to "^"')
+    parser.add_argument('--stop', type=str, default='$',
+                        help='sequence start char, defaults to "$"')
+
+    options = parser.parse_args()
+
+    for base in options.alphabet:
+        if base in string.whitespace:
+            parser.error("--alphabet argument must not contain whitespace")
+
+    return options
+
+
+def main():
+    """
+    counts kmers from fasta file according to parsed arguments
+    """
+    options = parse_arguments()
+
+    kmer_counter, seq_len = count_kmer(sys.stdin, alphabet=options.alphabet,
+                               order=options.order,
+                               start_char=options.start,
+                               stop_char=options.stop)
+
+    if options.sort == 'forward':
+        sorted_kmer = sorted(kmer_counter)
+    if options.sort == 'reverse':
+        sorted_kmer = sorted(kmer_counter)[::-1]
+
+    for kmer in sorted_kmer:
+        sys.stdout.write(kmer + '\t' + str(kmer_counter[kmer]) + '\n')
+
+if __name__ == '__main__':
+    main()

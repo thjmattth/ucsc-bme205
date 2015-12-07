@@ -1,0 +1,187 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw4
+# Local py: #!/usr/bin/env python2.7
+# Last Refactored: 10/27/15
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+coding-cost_old computes kmer-level information gain between test and train data
+
+reads in a table of k-mer counts (kmer'\t\count) from stdin and
+FASTA-formatted sequences from a file, computes the total coding
+cost in bits for the sequences, computes average cost per character,
+computes average cost per sequence, and prints to stdout
+
+Inputs:
+kmer counts from stdin (training data) in form kmer'\t'count
+
+Output:
+Printed summary of encoding cost
+        Total Encoding Cost:	 float
+        AVG Cost per Char:	 float
+        AVG Cost per Seq:	 float
+
+Arguments:
+testfile [file]
+    positional fasta file for markov test condition
+--alphabet [str]
+    String of acceptable base chars
+--pseudo [float or int]
+    adds non-zero positive number to kmer counts to prevent zero counts
+    when calculating kmer coding cost -log(probability)
+
+Sample run:
+$ count-kmers -o0 < train.seqs | coding-cost test.seqs > summary.txt
+    0 order markov model
+    table of kmers and counts from train.seqs fasta file
+    test.seqs provides test kmers with counts for coding-cost_old calculations
+    coding cost summary printed to sys.stdout as file summary.txt
+
+Notes:
+    Alphabet autodetected from training alpha if not specified
+    Default pseudocount is 1
+    Log Probabilities taken to prevent floating point underflow
+    Limited to use with -o0 and -o1 Markov models
+"""
+from __future__ import print_function, division
+from markov import *
+from fastIO import *
+import math
+import argparse
+import sys
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+    
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+
+    parser.add_argument('test_file', type=argparse.FileType('r'),
+                        help='positional fasta file for markov test condition')
+    parser.add_argument('-a', '--alphabet', type=str,
+                        help='acceptable base characters'
+                             'defaults to alphabet detected from training set')
+    parser.add_argument('-p', '--pseudo', type=(int or float), default=1.0,
+                        help='pseudocounts add non-zero positive number'
+                             'to kmer counts to prevent zero counts when '
+                             'calculating kmer coding cost -log(probability)')
+    options = parser.parse_args()
+
+    if options.pseudo < 0:
+        parser.error("Pseudocount must not be negative")
+
+    return options
+
+
+def logprob_context(counts):
+    """
+    calculate log probability from P(final_char) summing to one per context
+
+    :param counts: dict of dict, context counts as{'context':{'finalchar':int}}
+    :return: dict of dict, log_P as {'context':{'finalchar':float}}
+    """
+
+    log_p = {}
+
+    for context in counts.keys():
+        log_p_context = {}
+        context_total = sum(counts[context].values())
+        for kmer, freq in counts[context].items():
+            log_p_context[kmer] = math.log(context_total) - math.log(freq)
+        log_p[context] = log_p_context
+
+    return log_p
+
+
+def coding_costs(log_prob, order, test, alpha, start_char, stop_char):
+    """
+    calculate coding cost from test data with corresponding log_prob dictionary
+
+    :param log_prob: dict of dict, log_P as {'context':{'finalchar':float}}
+    :param order: int, markov order defaulting to 0 (iid model)
+    :param test: file, fasta file to parse and apply log probs to
+    :param alpha: str, all allowed bases
+    :param start_char: str, single start char defaulting to '^'
+    :param stop_char: str, single stop char defaulting to '$'
+    :return total_cost, avg_cost_char, avg_cost_seq: float, float, float
+    """
+
+    total_cost, total_chars, total_seqs = 0, 0, 0
+
+    for seqID, com, seq in read_fasta(test, alphabet=alpha, case='upper'):
+        total_chars += len(seq)
+        total_seqs += 1
+
+        seq_capped = start_char * order + seq + stop_char
+
+        for start in range(len(seq_capped) - order):
+            kmer = seq_capped[start:start + order + 1]
+            total_cost += log_prob[kmer[0:-1]][kmer[-1]]
+
+    total_cost = total_cost/math.log(2)
+    avg_cost_char = total_cost / total_chars
+    avg_cost_seq = total_cost / total_seqs
+
+    return total_cost, avg_cost_char, avg_cost_seq
+
+
+def main():
+    """
+    parse kmers and counts (tabular) from training set (sys.stdin)
+    autodetect alphabet from training set
+    build pseudcount dictionary
+    calculate log probabilities for each kmer by context
+    calculate total encoding costs, per character, and per sequence
+    write coding cost summary (sys.stdout)
+    """
+    options = parse_arguments()
+
+    # parse kmers and counts (tabular) from training set (sys.stdin)
+    train_kmer_count = count_kmer_table(sys.stdin)
+
+    # autodetect alphabet
+    if options.alphabet:
+        alphabet = options.alphabet
+    else:
+        alphabet_temp = ''
+        for kmer in train_kmer_count.keys():
+            alphabet_temp += kmer
+        alphabet = (''.join(set(alphabet_temp))).replace('^', '').replace(
+            '$', '')
+
+    # autodetect order
+    order = len(train_kmer_count.keys()[0]) - 1
+
+    # build pseudcount dictionary
+    kmer_counts_pseudo = counts_pseudo(kmer_count=train_kmer_count, order=order,
+                                       alphabet=alphabet,
+                                       start_char='^', stop_char='$',
+                                       pseudo=options.pseudo)
+
+    # calculate log probabilities for each kmer by context
+    log_p = logprob_context(kmer_counts_pseudo)
+
+    # calculate total encoding costs, per character, and per sequence
+    total_cost, avg_cost_char, avg_cost_seq = coding_costs(log_p, order=order,
+                                                test=options.test_file,
+                                                alpha=alphabet,
+                                                start_char='^', stop_char='$')
+    # write coding cost summary
+    print('Total Encoding Cost:\t',total_cost)
+    print('AVG Cost per Char:\t',avg_cost_char)
+    print('AVG Cost per Seq:\t',avg_cost_seq)
+
+def test(reduce):
+    return reduce
+
+
+if __name__ == '__main__':
+    main()
+

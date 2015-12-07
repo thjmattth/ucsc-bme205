@@ -1,0 +1,124 @@
+#!/usr/bin/env python2.7
+# File Location: /soe/thjmatthsoe/BME205_15/hw8
+# Local py: #!/usr/bin/env python2.7
+# Contact: thjmatth@ucsc.edu
+# Author: Thomas J Matthew
+"""
+test_align returns high-scoring alignments from a multi-seq fasta file
+
+Input:
+    Fasta file from stdin of multiple sequences
+        Each sequence (slave) in file is aligned to first sequence (master)
+    Base-substitution score matrix as BLOSSUM txt file or URL
+
+Output:
+    A2M alignment with alignment score printed to stdout
+
+Arguments:
+--subst_matrix [str]
+    URL or filename of BLOSSUM matrix
+--open [int]
+    Gap opening penalty
+--extend [int]
+    Gap extension penalty
+--double_gap [int]
+     Gap extension penalty for gap crossing and continuing on opposite strand
+--align [str]
+    Alignment algorithm as local or global
+
+Default arguments:
+    --open = 12
+    --extend = 1
+    --double_gap = 3
+    --subst_matrix = http://users.soe.ucsc.edu/~karplus/bme205/f13/BLOSUM62
+    --align = global
+
+Example of Unix command line prompt:
+$ python2.7 test_align < tests/align-3.fasta -a local -o 12 -e 1 -d 2
+local affine alignment on align-3.fasta; open, extend, double costs of 12, 1, 2
+"""
+
+from __future__ import division, print_function
+import argparse
+import sys
+import align
+from fastIO import read_fasta, read_subst
+from urllib2 import urlopen, Request
+
+
+def parse_arguments():
+    """
+    Parses arguments from the command line
+
+    :return: argparse.Namespace, options(arguments) with boolean values
+    """
+
+    disc = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=disc,
+                                     conflict_handler='resolve')
+
+    parser.add_argument('--open', '-o', '--start', '-s', type=int, default=12,
+            help='gap open (start) penalty, defaulting to 12')
+    parser.add_argument('--extend', '-e', type=int, default=1,
+            help='gap extension penalty, defaulting to 1')
+    parser.add_argument('--double_gap', '-d', type=int, default=3,
+            help='gap extension penalty across strands, defaulting to 3')
+    parser.add_argument('--align', '-a',
+                        help='"local" for local alignment, default is global')
+    parser.add_argument('--subst_matrix', '-s',
+            default='http://users.soe.ucsc.edu/~karplus/bme205/f13/BLOSUM62',
+            help='file or URL containing substitution matrix, defaulting to'
+                 ' http://users.soe.ucsc.edu/~karplus/bme205/f13/BLOSUM62')
+
+    options = parser.parse_args()
+
+    if options.subst_matrix.startswith('http://'):
+        options.subst_matrix = urlopen(Request(options.subst_matrix))
+    else:
+        options.subst_matrix = open(options.subst_matrix, mode='r')
+        
+    return options
+
+
+def main():
+    """
+    parses arguments from command line
+    instantiates Align class
+    reads fast sequence files from stdin
+    invokes alignment algorithm
+    prints A2M alignment with score to stdout
+    """
+    # parses arguments from command line
+    options = parse_arguments()
+    subst, alphabet = read_subst(options.subst_matrix)
+    options.subst_matrix.close()
+
+    # instantiates Align class
+    if options.align == 'local':
+        aligner = align.LocalAlign(subst, start=options.open,
+                extend=options.extend, double=options.double_gap)
+    else:
+        print('executing global aligner')
+        aligner = align.GlobalAlign(subst, start=options.open,
+                extend=options.extend, double=options.double_gap)
+
+    # reads fast sequence files from stdin
+    master = None
+    for name, com, seq in read_fasta(sys.stdin, alphabet, case='upper'):
+        if master is None:
+            master, master_name = seq, name
+            print('>' + master_name)
+            print(master)
+        else:
+            # invokes alignment algorithm
+            score = aligner.align(master, seq)
+            seq = aligner.traceback_col_seq()
+
+            # prints A2M alignment with score to stdout
+            report = 'alignment to {} scored {}'.format(master_name, score)
+            print('>' + name, ' ', report)
+            print(seq)
+
+if __name__ == "__main__":
+    sys.exit(main())

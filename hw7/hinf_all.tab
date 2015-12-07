@@ -1,0 +1,40 @@
+# Reading from H.influenzae.fa.gz
+# After reading, user time is  3.61754417419 seconds
+# There are 64 kmers being considered ( 128 hypotheses),
+# and about 1830140 positions where kmers could be.
+# Reporting palindromes from length 6 to 6 ,
+# which are under- or over-represented with E_value <= 0.01
+#k-mer	observed	expected	Z_Score			E_Value
+GTTAAC	19		336.8		-17.32		1.089e-65
+GAATTC	302		668.6		-14.18		3.833e-44
+TAATTA	916		1410.0		-13.17		4.322e-38
+GATATC	176		448.8		-12.88		1.897e-36
+GTGCAC	141		380.6		-12.28		3.622e-33
+AAGCTT	359		651.1		-11.45		7.499e-29
+ATGCAT	255		477.7		-10.19		6.902e-23
+GGCGCC	27		139.7		-9.537		4.713e-20
+GTCGAC	4		93.36		-9.248		7.291e-19
+CATATG	174		337.3		-8.89		1.95e-17
+CTTAAG	122		258.9		-8.507		5.689e-16
+TGCGCA	350		546.5		-8.408		1.329e-15
+AAATTT	2904		3380.0		-8.196		7.966e-15
+CAATTG	674		920.2		-8.118		1.514e-14
+AATATT	2035		2410.0		-7.639		6.98e-13
+TTCGAA	174		301.2		-7.33		7.381e-12
+GGTACC	72		161.6		-7.05		5.731e-11
+CGATCG	142		253.0		-6.98		9.454e-11
+TTTAAA	2284		2585.0		-5.93		9.708e-08
+ATATAT	425		565.7		-5.917		1.051e-07
+AGCGCT	47		105.5		-5.693		3.989e-07
+GCTAGC	61		120.9		-5.446		1.645e-06
+GTATAC	57		114.8		-5.394		2.2e-06
+GAGCTC	64		121.9		-5.244		5.029e-06
+GGATCC	96		162.0		-5.184		6.962e-06
+GGGCCC	25		66.61		-5.098		1.097e-05
+CAGCTG	310		411.1		-4.989		1.946e-05
+CACGTG	235		318.1		-4.661		0.0001008
+CGTACG	117		178.7		-4.615		0.0001261
+GACGTC	35		73.31		-4.475		0.0002448
+ATCGAT	387		480.9		-4.284		0.0005863
+TTATAA	888		1015.0		-3.98		0.002201
+# Total user time is 3.61754417419 seconds
